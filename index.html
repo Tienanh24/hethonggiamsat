@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Hệ thống Giám sát Buồng lái Xe</title>
+
+    <!-- ======== Thư viện Firebase ======== -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+
+    <!-- ======== Thư viện Chart.js ======== -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- ======== Thư viện jQuery + DataTables ======== -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <link
+      rel="stylesheet"
+      href="https://cdn.datatables.net/1.13.5/css/jquery.dataTables.min.css"
+    />
+    <script src="https://cdn.datatables.net/1.13.5/js/jquery.dataTables.min.js"></script>
+
+    <!-- ======== CSS tùy chỉnh ======== -->
+    <style>
+      /* ===== Reset cơ bản ===== */
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background: linear-gradient(135deg, #f2f5f7, #e0e7ff);
+        color: #333;
+        padding: 20px;
+      }
+      h1 {
+        text-align: center;
+        margin-bottom: 20px;
+        font-size: 32px;
+        color: #1e40af;
+      }
+
+      /* ===== Thanh điều hướng (tabs) ===== */
+      .nav {
+        display: flex;
+        justify-content: center;
+        gap: 20px;
+        margin-bottom: 30px;
+      }
+      .nav button {
+        padding: 10px 25px;
+        font-size: 16px;
+        border: none;
+        border-radius: 8px;
+        background-color: #3b82f6;
+        color: white;
+        cursor: pointer;
+        transition: background-color 0.2s ease, transform 0.2s ease;
+      }
+      .nav button.active,
+      .nav button:hover {
+        background-color: #1d4ed8;
+        transform: translateY(-2px);
+      }
+
+      /* ===== Section ===== */
+      .section {
+        display: none;
+      }
+      .active-section {
+        display: block;
+      }
+
+      /* ===== Phần “Theo dõi trực tiếp”: grid 2 cột, 2 hàng ===== */
+      .monitor-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        grid-template-rows: auto auto;
+        gap: 20px;
+        max-width: 1200px;
+        margin: auto;
+      }
+      /* Hai ô trên (Nhiệt độ + Khí Gas) phóng to */
+      .monitor-grid .large-card {
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        transition: box-shadow 0.3s ease;
+      }
+      .monitor-grid .large-card:hover {
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+      }
+      .monitor-grid .large-card.temp-card {
+        border-left: 5px solid #ef4444;
+      }
+      .monitor-grid .large-card.gas-card {
+        border-left: 5px solid #3b82f6;
+      }
+      .monitor-grid .large-card .card-title {
+        font-size: 20px;
+        font-weight: bold;
+        margin-bottom: 10px;
+        color: #2c3e50;
+      }
+      .monitor-grid .large-card canvas {
+        width: 100% !important;
+        height: 350px !important; /* Tăng chiều cao để hiển thị “to” */
+      }
+      /* Hai ô dưới (Cảnh báo) */
+      .monitor-grid .small-card {
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        padding: 20px;
+        text-align: center;
+        position: relative;
+        min-height: 180px;
+        transition: box-shadow 0.3s ease;
+      }
+      .monitor-grid .small-card:hover {
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+      }
+      .monitor-grid .small-card.fire-card {
+        border-left: 5px solid #ef4444;
+      }
+      .monitor-grid .small-card.sleep-card {
+        border-left: 5px solid #f59e0b;
+      }
+      .monitor-grid .small-card .card-title {
+        font-size: 18px;
+        font-weight: bold;
+        margin-bottom: 12px;
+        color: #2c3e50;
+      }
+      .alert-circle {
+        width: 100px;
+        height: 100px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        font-weight: bold;
+        font-size: 18px;
+        opacity: 0;
+        transition: opacity 0.3s ease, transform 0.3s ease;
+        margin: 0 auto;
+      }
+      .alert-circle.active {
+        opacity: 1;
+        animation: blink 1s infinite, scalePulse 1.5s infinite;
+      }
+      .alert-circle.fire {
+        background-color: #ef4444;
+      }
+      .alert-circle.sleep {
+        background-color: #f59e0b;
+      }
+      @keyframes blink {
+        50% {
+          opacity: 0.3;
+        }
+      }
+      @keyframes scalePulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.05); }
+      }
+
+      /* ===== Nút “Báo thức thủ công” ===== */
+      #manualBtn {
+        margin: 20px auto;
+        display: block;
+        padding: 12px 30px;
+        font-size: 17px;
+        font-weight: bold;
+        background-color: #ea580c;
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background-color 0.2s ease, transform 0.2s ease;
+      }
+      #manualBtn:hover {
+        background-color: #c2410c;
+        transform: translateY(-2px);
+      }
+
+      /* ===== Trạng thái WebSocket ===== */
+      #wsStatus {
+        font-weight: bold;
+        color: #22c55e;
+      }
+      .ws-disconnected #wsStatus {
+        color: #ef4444;
+      }
+
+      /* ===== Phần “Xem lịch sử” ===== */
+      #historyContainer {
+        max-width: 1200px;
+        margin: auto;
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        padding: 15px;
+      }
+      #logTable_wrapper .dt-buttons {
+        margin-bottom: 10px;
+      }
+      table.dataTable thead th {
+        background-color: #3b82f6;
+        color: #fff;
+      }
+      table.dataTable tbody tr:nth-child(even) {
+        background-color: #f9fafb;
+      }
+      table.dataTable tbody tr:hover {
+        background-color: #eff6ff;
+      }
+      #charts {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 30px;
+        margin-top: 30px;
+        justify-content: center;
+      }
+      .chart-card {
+        width: 45%;
+        min-width: 300px;
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        padding: 20px;
+        transition: box-shadow 0.3s ease;
+      }
+      .chart-card:hover {
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+      }
+      .chart-card.temp-card {
+        border-left: 5px solid #ef4444;
+      }
+      .chart-card.gas-card {
+        border-left: 5px solid #3b82f6;
+      }
+      .chart-card .card-title {
+        font-size: 18px;
+        font-weight: bold;
+        margin-bottom: 10px;
+        color: #2c3e50;
+      }
+      .chart-card canvas {
+        width: 100% !important;
+        height: 300px !important;
+      }
+
+      /* ===== Responsive ===== */
+      @media (max-width: 768px) {
+        .nav {
+          flex-wrap: wrap;
+        }
+        .monitor-grid {
+          grid-template-columns: 1fr;
+        }
+        .monitor-grid .large-card,
+        .monitor-grid .small-card {
+          margin-bottom: 20px;
+        }
+        #manualBtn {
+          width: 100%;
+        }
+        #charts {
+          flex-direction: column;
+          align-items: center;
+        }
+        .chart-card {
+          width: 90%;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <h1>Hệ thống Giám sát Buồng lái Xe</h1>
+
+    <!-- ===== Tabs ===== -->
+    <div class="nav">
+      <button id="btnMonitor" class="active" onclick="showSection('monitor')">
+        Theo dõi trực tiếp
+      </button>
+      <button id="btnHistory" onclick="showSection('history')">
+        Xem lịch sử
+      </button>
+    </div>
+
+    <!-- ===== Phần “Theo dõi trực tiếp” ===== -->
+    <div id="monitor" class="section active-section">
+      <div class="monitor-grid">
+        <!-- Ô Nhiệt độ (lớn) -->
+        <div class="large-card temp-card">
+          <div class="card-title">Nhiệt độ (°C)</div>
+          <canvas id="tempChart"></canvas>
+        </div>
+        <!-- Ô Khí Gas (lớn) -->
+        <div class="large-card gas-card">
+          <div class="card-title">Khí CO</div>
+          <canvas id="gasChart"></canvas>
+        </div>
+        <!-- Ô Cảnh báo Cháy -->
+        <div class="small-card fire-card">
+          <div class="card-title">Cảnh báo Cháy</div>
+          <div id="fireAlert" class="alert-circle fire">CHÁY</div>
+        </div>
+        <!-- Ô Cảnh báo Ngủ gật -->
+        <div class="small-card sleep-card">
+          <div class="card-title">Cảnh báo Ngủ Gật</div>
+          <div id="sleepAlert" class="alert-circle sleep">NGỦ</div>
+        </div>
+      </div>
+
+      <button id="manualBtn">Báo thức thủ công</button>
+
+      <div style="text-align: center; margin-top: 10px; font-size: 15px;">
+        WebSocket trạng thái:
+        <span id="wsStatus">Đang kết nối...</span>
+      </div>
+    </div>
+
+    <!-- ===== Phần “Xem lịch sử” ===== -->
+    <div id="history" class="section">
+      <div id="historyContainer">
+        <table id="logTable" class="display" style="width:100%">
+          <thead>
+            <tr>
+              <th>Thời gian</th>
+              <th>Nhiệt độ</th>
+              <th>CO</th>
+              <th>Cháy</th>
+              <th>Cảnh báo Cháy</th>
+              <th>Cảnh báo Ngủ gật</th>
+              <th>Cảnh báo Thủ công</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+
+        <div id="charts">
+          <div class="chart-card temp-card">
+            <div class="card-title">Biểu đồ Nhiệt độ (Lịch sử)</div>
+            <canvas id="tempHistory"></canvas>
+          </div>
+          <div class="chart-card gas-card">
+            <div class="card-title">Biểu đồ Khí Gas (Lịch sử)</div>
+            <canvas id="gasHistory"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+
+    <!-- ===== Phần âm thanh cảnh báo ===== -->
+    <audio id="fireSound" src="fire-alert.mp3" preload="auto"></audio>
+    <audio id="sleepSound" src="sleep-alert.mp3" preload="auto"></audio>
+    <audio id="wakeUpSound" src="wake-up.mp3" preload="auto"></audio>
+
+
+
+    <!-- ===== JavaScript ===== -->
+    <script>
+      // ===== Hàm chuyển tab =====
+      function showSection(id) {
+        document.querySelectorAll(".section").forEach((s) =>
+          s.classList.remove("active-section")
+        );
+        document.getElementById(id).classList.add("active-section");
+
+        document.querySelectorAll(".nav button").forEach((btn) =>
+          btn.classList.remove("active")
+        );
+        if (id === "monitor") {
+          document.getElementById("btnMonitor").classList.add("active");
+        } else {
+          document.getElementById("btnHistory").classList.add("active");
+        }
+      }
+
+      // ===== Cấu hình Firebase =====
+      const firebaseConfig = {
+        apiKey: "AIzaSyA03uNN08Y72PD_TdMYAv6UeeVSyely28g",
+        authDomain: "iot-buong-lai-tau.firebaseapp.com",
+        databaseURL:
+          "https://iot-buong-lai-tau-default-rtdb.firebaseio.com",
+        projectId: "iot-buong-lai-tau",
+        storageBucket: "iot-buong-lai-tau.firebasestorage.app",
+        messagingSenderId: "365927063641",
+        appId: "1:365927063641:web:ea857f7b730a0b64321148",
+        measurementId: "G-VDVGE30L2R",
+      };
+      firebase.initializeApp(firebaseConfig);
+      const db = firebase.database();
+
+      // ===== Dữ liệu real-time (frontend) =====
+      const tempData = [];
+      const gasData = [];
+      const timeLabels = [];
+      const MAX_POINTS = 50; // Giới hạn số điểm hiển thị
+
+      // ===== Cấu hình Chart.js (real-time) =====
+      const tempCtx = document.getElementById("tempChart").getContext("2d");
+      const gasCtx = document.getElementById("gasChart").getContext("2d");
+
+      const commonRealTimeOptions = {
+        animation: { duration: 0 }, // Tắt animation để cập nhật tức thì
+        responsive: true,
+        scales: {
+          x: {
+            display: true,
+            ticks: {
+              maxRotation: 0,
+              autoSkip: true,
+              maxTicksLimit: 10,
+            },
+          },
+          y: {
+            display: true,
+            beginAtZero: true,
+          },
+        },
+        plugins: {
+          legend: { display: false },
+        },
+      };
+
+      const tempChart = new Chart(tempCtx, {
+        type: "line",
+        data: {
+          labels: timeLabels,
+          datasets: [
+            {
+              label: "Nhiệt độ (°C)",
+              data: tempData,
+              borderColor: "#ef4444",
+              backgroundColor: "rgba(239, 68, 68, 0.2)",
+              borderWidth: 2,
+              tension: 0.4,
+              fill: true,
+              pointRadius: 0,
+            },
+          ],
+        },
+        options: commonRealTimeOptions,
+      });
+
+      const gasChart = new Chart(gasCtx, {
+        type: "line",
+        data: {
+          labels: timeLabels,
+          datasets: [
+            {
+              label: "Khí Gas (ppm)",
+              data: gasData,
+              borderColor: "#3b82f6",
+              backgroundColor: "rgba(59, 130, 246, 0.2)",
+              borderWidth: 2,
+              tension: 0.4,
+              fill: true,
+              pointRadius: 0,
+            },
+          ],
+        },
+        options: commonRealTimeOptions,
+      });
+
+      // ===== WebSocket =====
+      const WS_URL = "wss://tienanhiot.onrender.com"; // Thay IP+port nếu cần
+      let ws;
+
+      function connectWebSocket() {
+        ws = new WebSocket(WS_URL);
+
+        ws.onopen = () => {
+          document.getElementById("wsStatus").textContent = "Đã kết nối";
+          document.body.classList.remove("ws-disconnected");
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            handleIncomingData(data);
+          } catch (err) {
+            console.warn("Non-JSON message:", event.data);
+          }
+        };
+
+        ws.onclose = () => {
+          document.getElementById("wsStatus").textContent =
+            "Ngắt kết nối, thử lại trong 2s...";
+          document.body.classList.add("ws-disconnected");
+          setTimeout(connectWebSocket, 2000);
+        };
+
+        ws.onerror = (err) => {
+          console.error("WebSocket error:", err);
+          ws.close();
+        };
+      }
+      connectWebSocket();
+
+      // ===== Xử lý dữ liệu từ WebSocket =====
+      function handleIncomingData(data) {
+        const nowISO = new Date().toISOString();
+        const nowLabel = new Date().toLocaleTimeString("vi-VN");
+
+        // --- Nếu data từ ESP32 chứa { temp, gas, fire } ---
+        if (
+          data.hasOwnProperty("temp") &&
+          data.hasOwnProperty("gas") &&
+          data.hasOwnProperty("fire")
+        ) {
+          const t = parseFloat(data.temp);
+          const g = parseInt(data.gas);
+          const f = parseInt(data.fire);
+
+          // Giới hạn MAX_POINTS và đẩy label/data vào cuối mảng (cũ → mới)
+          if (timeLabels.length >= MAX_POINTS) {
+            timeLabels.shift();
+            tempData.shift();
+            gasData.shift();
+          }
+          timeLabels.push(nowLabel);
+          tempData.push(isNaN(t) ? null : t);
+          gasData.push(isNaN(g) ? null : g);
+          tempChart.update();
+          gasChart.update();
+
+          // Hiển thị cảnh báo cháy nếu f===1
+          if (f === 1) {
+            showFireAlert();
+          }
+
+          // Tạo record để lưu lên Firebase
+          const entry = {
+            timestamp: nowISO,
+            temp: isNaN(t) ? null : t,
+            gas: isNaN(g) ? null : g,
+            fire: f,
+            fire_alert: f === 1,
+            sleep_alert: false,
+            manual_alert: false,
+          };
+          saveToFirebase(entry);
+
+          // Thêm vào DataTable và ép sắp xếp lại
+          if (dataTable) {
+            dataTable.row.add(entry);
+            dataTable.order([0, "desc"]).draw(false);
+          }
+        }
+
+        // --- Nếu data từ YOLO gửi { alert:"emotion_detected", emotion:"Sleepy" } ---
+        if (
+          data.alert === "emotion_detected" &&
+          data.emotion === "Sleepy"
+        ) {
+          showSleepAlert();
+
+          const entry = {
+            timestamp: nowISO,
+            temp: null,
+            gas: null,
+            fire: null,
+            fire_alert: false,
+            sleep_alert: true,
+            manual_alert: false,
+          };
+          saveToFirebase(entry);
+          if (dataTable) {
+            dataTable.row.add(entry);
+            dataTable.order([0, "desc"]).draw(false);
+          }
+        }
+      }
+
+      // ===== Hiển thị cảnh báo =====
+      const fireAlertEl = document.getElementById("fireAlert");
+      const sleepAlertEl = document.getElementById("sleepAlert");
+
+      function showFireAlert() {
+        if (!fireAlertEl.classList.contains("active")) {
+          fireAlertEl.classList.add("active");
+          document.getElementById("fireSound").play();
+          setTimeout(() => {
+            fireAlertEl.classList.remove("active");
+          }, 5000);
+        }
+      }
+
+      function showSleepAlert() {
+        if (!sleepAlertEl.classList.contains("active")) {
+          sleepAlertEl.classList.add("active");
+          document.getElementById("sleepSound").play();
+          setTimeout(() => {
+            sleepAlertEl.classList.remove("active");
+          }, 5000);
+        }
+      }
+
+      // ===== “Báo thức thủ công” =====
+      document.getElementById("manualBtn").addEventListener("click", () => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ command: "manual_alarm" }));
+        }
+        showSleepAlert();
+        const entry = {
+          timestamp: new Date().toISOString(),
+          temp: null,
+          gas: null,
+          fire: null,
+          fire_alert: false,
+          sleep_alert: false,
+          manual_alert: true,
+        };
+        saveToFirebase(entry);
+        if (dataTable) {
+          dataTable.row.add(entry);
+          dataTable.order([0, "desc"]).draw(false);
+        }
+      });
+
+      // ===== DataTable & Firebase =====
+      let dataTable = null;
+      $(document).ready(function () {
+        dataTable = $("#logTable").DataTable({
+          columns: [
+            {
+              data: "timestamp",
+              render: (d) => new Date(d).toLocaleString("vi-VN"),
+            },
+            {
+              data: "temp",
+              render: (d) => (d === null || d === undefined ? "-" : d),
+            },
+            {
+              data: "gas",
+              render: (d) => (d === null || d === undefined ? "-" : d),
+            },
+            {
+              data: "fire",
+              render: (d) => (d === 1 ? "Có" : "Không"),
+            },
+            {
+              data: "fire_alert",
+              render: (d) => (d ? "Có" : "Không"),
+            },
+            {
+              data: "sleep_alert",
+              render: (d) => (d ? "Có" : "Không"),
+            },
+            {
+              data: "manual_alert",
+              render: (d) => (d ? "Có" : "Không"),
+            },
+          ],
+          order: [[0, "desc"]],    // Mặc định sắp xếp theo cột thời gian, mới nhất lên trên
+          dom: "Bfrtip",
+          buttons: ["copy", "csv", "excel", "pdf", "print"],
+          stateSave: true,         // Giữ trạng thái pagination / sorting khi draw lại
+          pageLength: 10,
+        });
+
+        loadLogsFromFirebase();
+      });
+
+      // Lưu record lên Firebase
+      function saveToFirebase(entry) {
+        db.ref("logs").push(entry, (err) => {
+          if (err) {
+            console.error("Firebase write failed:", err);
+          }
+        });
+      }
+
+      // Lấy logs từ Firebase, cập nhật DataTable & Biểu đồ lịch sử
+      function loadLogsFromFirebase() {
+        db.ref("logs")
+          .orderByChild("timestamp")
+          .on("value", (snapshot) => {
+            const logsAsc = [];   // Sẽ giữ thứ tự “tăng dần” theo timestamp (cũ → mới)
+            snapshot.forEach((child) => {
+              logsAsc.push(child.val());
+            });
+            // logsAsc hiện đang là thứ tự tăng dần (vì orderByChild + forEach)
+            // Nếu bạn muốn chắc chắn, có thể sort thêm:
+            logsAsc.sort((a, b) =>
+              a.timestamp < b.timestamp
+                ? -1
+                : a.timestamp > b.timestamp
+                ? 1
+                : 0
+            );
+
+            // ********** Cập nhật DataTable (sắp xếp DESC trong DataTable) **********
+            const logsDesc = [...logsAsc].reverse(); // Đảo ngược thành thứ tự mới nhất → cũ
+            dataTable.clear();
+            dataTable.rows.add(logsDesc);
+            dataTable.draw(false);
+
+            // ********** Cập nhật Biểu đồ lịch sử (thứ tự ASC) **********
+            updateHistoryCharts(logsAsc);
+          });
+      }
+
+      // ===== Biểu đồ lịch sử (dashboard) =====
+      const tempHistoryCtx = document
+        .getElementById("tempHistory")
+        .getContext("2d");
+      const gasHistoryCtx = document
+        .getElementById("gasHistory")
+        .getContext("2d");
+
+      const historyOptions = {
+        animation: { duration: 0 }, // Tắt animation để vẽ nhanh
+        responsive: true,
+        scales: {
+          x: {
+            display: true,
+            ticks: {
+              maxRotation: 0,
+              autoSkip: true,
+              maxTicksLimit: 10,
+            },
+          },
+          y: {
+            display: true,
+            beginAtZero: true,
+          },
+        },
+        plugins: {
+          legend: { display: false },
+        },
+      };
+
+      const tempHistoryChart = new Chart(tempHistoryCtx, {
+        type: "line",
+        data: {
+          labels: [],
+          datasets: [
+            {
+              label: "Nhiệt độ (°C)",
+              data: [],
+              borderColor: "#ef4444",
+              backgroundColor: "rgba(239, 68, 68, 0.2)",
+              borderWidth: 2,
+              fill: true,
+              tension: 0.4,
+              pointRadius: 0,
+            },
+          ],
+        },
+        options: historyOptions,
+      });
+
+      const gasHistoryChart = new Chart(gasHistoryCtx, {
+        type: "line",
+        data: {
+          labels: [],
+          datasets: [
+            {
+              label: "Khí Gas (ppm)",
+              data: [],
+              borderColor: "#3b82f6",
+              backgroundColor: "rgba(59, 130, 246, 0.2)",
+              borderWidth: 2,
+              fill: true,
+              tension: 0.4,
+              pointRadius: 0,
+            },
+          ],
+        },
+        options: historyOptions,
+      });
+
+      function updateHistoryCharts(logsAsc) {
+        // Chỉ lấy những logs có giá trị temp để vẽ biểu đồ Nhiệt độ
+        const tempLogs = logsAsc.filter((l) => l.temp !== null);
+        const gasLogs = logsAsc.filter((l) => l.gas !== null);
+
+        const tempLabels = tempLogs.map((l) =>
+          new Date(l.timestamp).toLocaleTimeString("vi-VN")
+        );
+        const tempValues = tempLogs.map((l) => l.temp);
+
+        const gasLabels = gasLogs.map((l) =>
+          new Date(l.timestamp).toLocaleTimeString("vi-VN")
+        );
+        const gasValues = gasLogs.map((l) => l.gas);
+
+        // Cập nhật Nhiệt độ (từ cũ → mới)
+        tempHistoryChart.data.labels = tempLabels;
+        tempHistoryChart.data.datasets[0].data = tempValues;
+        tempHistoryChart.update();
+
+        // Cập nhật Khí Gas (từ cũ → mới)
+        gasHistoryChart.data.labels = gasLabels;
+        gasHistoryChart.data.datasets[0].data = gasValues;
+        gasHistoryChart.update();
+      }
+    </script>
+  </body>
+</html>
